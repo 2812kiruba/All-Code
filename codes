@@ -1,0 +1,43 @@
+    public string FileName { get; set; }
+    public byte[] ContentPdf { get; set; }
+
+    public string Status {  get; set; }
+}
+
+
+
+      public async Task<List<PdfFile>> CreatePdfFilesToProcessv1(List<IFormFile> input)
+      {
+          var pdfFiles = new List<PdfFile>();
+          foreach (var file in input)
+          {
+              var memoryStream = new MemoryStream();
+              await file.CopyToAsync(memoryStream);
+              var pdfData = memoryStream.ToArray();
+
+              // Create an instance of the PdfFile entity
+              var pdfEntity = new PdfFile
+              {
+                  FileName = file.FileName,  // The original file name
+                  ContentPdf = pdfData,  // Store the file content as a byte array
+                  Status = "Uploaded"  // Status of the file upload
+              };
+              pdfFiles.Add(pdfEntity);
+          }
+
+          return pdfFiles;
+      }
+
+
+
+  public class MyPdfService:  ITransientDependency
+  {
+  
+      private readonly IBackgroundJobManager _backgroundJobManager;
+      private readonly IRepository<PdfFile, Guid> _pdfDocumentRepository;
+
+
+      public MyPdfService(IRepository<PdfFile, Guid> pdfDocumentRepository)
+      {
+          _pdfDocumentRepository = pdfDocumentRepository;
+      }
