@@ -1,0 +1,59 @@
+dotnet add package Tesseract
+dotnet add package PdfPig
+
+using System.IO;
+using Tesseract;
+using PdfPig;
+using PdfPig.Writer;
+
+public class OcrService
+{
+    public byte[] ProcessPdfWithOcr(Stream inputPdfStream)
+    {
+        using var engine = new TesseractEngine(@"./tessdata", "eng", EngineMode.Default);
+        var pdfBytes = new List<byte>();
+
+        using (var reader = PdfDocument.Open(inputPdfStream))
+        {
+            foreach (var page in reader.GetPages())
+            {
+                var bitmap = RenderPageAsImage(page); // Convert the page to image format for OCR
+                var ocrResult = engine.Process(bitmap);
+
+                foreach (var word in ocrResult.GetWords())
+                {
+                    // Logic to overlay text highlights on the PDF, e.g., using PdfPig or iTextSharp
+                    HighlightText(word, page);
+                }
+            }
+
+            pdfBytes = SavePdfToMemoryStream(reader);
+        }
+        return pdfBytes.ToArray();
+    }
+}
+
+
+[Route("api/ocr")]
+public class OcrController : AbpController
+{
+    private readonly OcrService _ocrService;
+
+    public OcrController(OcrService ocrService)
+    {
+        _ocrService = ocrService;
+    }
+
+    [HttpPost]
+    [Route("process")]
+    public async Task<IActionResult> ProcessPdf(IFormFile pdfFile)
+    {
+        if (pdfFile == null || pdfFile.Length == 0)
+            return BadRequest("Invalid PDF file");
+
+        using var stream = pdfFile.OpenReadStream();
+        var resultPdf = _ocrService.ProcessPdfWithOcr(stream);
+
+        return File(resultPdf, "application/pdf", "HighlightedOutput.pdf");
+    }
+}
