@@ -27,6 +27,12 @@ public class OcrService
                 }
             }
 
+
+
+
+
+https://github.com/itext/itext-pdfocr-dotnet
+
             pdfBytes = SavePdfToMemoryStream(reader);
         }
         return pdfBytes.ToArray();
