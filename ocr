@@ -1,0 +1,91 @@
+Install-Package Tesseract
+Install-Package UglyToad.PdfPig
+Install-Package PdfSharp
+
+
+
+
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using PdfSharp.Pdf;
+using UglyToad.PdfPig;
+using Tesseract;
+
+public void ProcessPdfWithOcr(string inputPdfPath, string outputPdfPath)
+{
+    var ocrEngine = new TesseractEngine(@"./tessdata", "eng", EngineMode.Default);
+    using var pdfDocument = PdfDocument.Open(inputPdfPath);
+    var outputDocument = new PdfSharp.Pdf.PdfDocument();
+
+    foreach (var page in pdfDocument.GetPages())
+    {
+        using (var bitmap = page.Render())
+        {
+            // Convert bitmap to grayscale for better OCR
+            var grayBitmap = new Bitmap(bitmap.Width, bitmap.Height, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(grayBitmap))
+            {
+                var colorMatrix = new ColorMatrix(new float[][]
+                {
+                    new float[] {.3f, .3f, .3f, 0, 0},
+                    new float[] {.59f, .59f, .59f, 0, 0},
+                    new float[] {.11f, .11f, .11f, 0, 0},
+                    new float[] {0, 0, 0, 1, 0},
+                    new float[] {0, 0, 0, 0, 1}
+                });
+                var attributes = new ImageAttributes();
+                attributes.SetColorMatrix(colorMatrix);
+                g.DrawImage(bitmap, new Rectangle(0, 0, bitmap.Width, bitmap.Height), 0, 0, bitmap.Width, bitmap.Height, GraphicsUnit.Pixel, attributes);
+            }
+
+            // OCR the bitmap
+            var ocrResult = ocrEngine.Process(grayBitmap);
+            var recognizedText = ocrResult.GetText();
+
+            // Add OCR text to the new PDF
+            var pdfPage = outputDocument.AddPage();
+            var gfx = XGraphics.FromPdfPage(pdfPage);
+            gfx.DrawString(recognizedText, new XFont("Arial", 12), XBrushes.Black, new XRect(0, 0, pdfPage.Width, pdfPage.Height));
+        }
+    }
+
+    outputDocument.Save(outputPdfPath);
+}
+
+
+
+
+
+using PdfSharp.Drawing;
+using PdfSharp.Pdf.Annotations;
+
+public void HighlightText(PdfDocument document, string textToHighlight)
+{
+    foreach (var page in document.Pages)
+    {
+        var graphics = XGraphics.FromPdfPage(page);
+        var textLayer = page.GetWords();
+        
+        foreach (var word in textLayer)
+        {
+            if (word.Text.Contains(textToHighlight, StringComparison.OrdinalIgnoreCase))
+            {
+                // Draw a semi-transparent rectangle over the text
+                graphics.DrawRectangle(new XSolidBrush(XColor.FromArgb(128, 255, 255, 0)),
+                    word.BoundingBox.Left, word.BoundingBox.Top, word.BoundingBox.Width, word.BoundingBox.Height);
+            }
+        }
+    }
+}
+
+
+public class PdfProcessingService : IPdfProcessingService
+{
+    public void ProcessAndHighlightPdf(string inputPdfPath, string outputPdfPath, string highlightText)
+    {
+        ProcessPdfWithOcr(inputPdfPath, outputPdfPath);
+        HighlightText(outputPdfPath, highlightText);
+    }
+}
