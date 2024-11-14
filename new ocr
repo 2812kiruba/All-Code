@@ -1,0 +1,129 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
+
+public class ImageHighlighterService
+{
+    private readonly IWebHostEnvironment _env;
+
+    public ImageHighlighterService(IWebHostEnvironment env)
+    {
+        _env = env;
+    }
+
+    public void HighlightWordsInTiffFiles(List<List<int>> boundingPolygons)
+    {
+        // Get the root directory path for the web app
+        string rootPath = _env.WebRootPath;
+
+        // Get all TIFF files in the root directory
+        var tiffFiles = Directory.GetFiles(rootPath, "*.tiff");
+
+        // Loop through each TIFF file
+        foreach (string inputFilePath in tiffFiles)
+        {
+            // Define output path for the highlighted image
+            string outputFilePath = Path.Combine(rootPath, "highlighted_" + Path.GetFileName(inputFilePath));
+
+            // Process each image with the list of bounding polygons
+            HighlightWords(inputFilePath, outputFilePath, boundingPolygons);
+            Console.WriteLine($"Processed {inputFilePath} and saved highlighted image to {outputFilePath}");
+        }
+    }
+
+    private void HighlightWords(string inputImagePath, string outputImagePath, List<List<int>> boundingPolygons)
+    {
+        using (Bitmap image = new Bitmap(inputImagePath))
+        {
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                foreach (var polygonCoords in boundingPolygons)
+                {
+                    // Parse coordinates to Points
+                    List<Point> polygonPoints = ParsePolygonCoordinates(polygonCoords);
+
+                    // Draw highlight polygon for each bounding box
+                    using (Brush highlightBrush = new SolidBrush(Color.FromArgb(128, Color.Yellow))) // Semi-transparent yellow
+                    {
+                        graphics.FillPolygon(highlightBrush, polygonPoints.ToArray());
+                    }
+                }
+            }
+            // Save the output image
+            image.Save(outputImagePath);
+        }
+    }
+
+    private List<Point> ParsePolygonCoordinates(List<int> coordinates)
+    {
+        var points = new List<Point>();
+        for (int i = 0; i < coordinates.Count; i += 2)
+        {
+            points.Add(new Point(coordinates[i], coordinates[i + 1]));
+        }
+        return points;
+    }
+}
+
+
+
+
+
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Linq;
+
+public class ImageHighlighter
+{
+    public static void HighlightWord(string inputImagePath, string outputImagePath, List<Point> polygonPoints)
+    {
+        // Load the image
+        using (Bitmap image = new Bitmap(inputImagePath))
+        {
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                // Set up the highlight brush and polygon fill color
+                using (Brush highlightBrush = new SolidBrush(Color.FromArgb(128, Color.Yellow))) // Semi-transparent yellow
+                {
+                    // Fill the polygon to highlight
+                    graphics.FillPolygon(highlightBrush, polygonPoints.ToArray());
+                }
+            }
+
+            // Save the highlighted image
+            image.Save(outputImagePath);
+        }
+    }
+
+    public static List<Point> ParsePolygonCoordinates(List<int> coordinates)
+    {
+        // Assumes coordinates are in format x1, y1, x2, y2, ..., xn, yn
+        var points = new List<Point>();
+        for (int i = 0; i < coordinates.Count; i += 2)
+        {
+            points.Add(new Point(coordinates[i], coordinates[i + 1]));
+        }
+        return points;
+    }
+
+    public static void Main()
+    {
+        // Example coordinates of the bounding polygon
+        List<int> boundingPolygon = new List<int> { 50, 50, 150, 50, 150, 100, 50, 100 };
+
+        // Parse coordinates to get a list of Points
+        List<Point> polygonPoints = ParsePolygonCoordinates(boundingPolygon);
+
+        // Highlight word in the image
+        HighlightWord("input.jpg", "output.jpg", polygonPoints);
+        Console.WriteLine("Image saved with highlighted word.");
+    }
+}
+
