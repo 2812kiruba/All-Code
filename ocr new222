@@ -1,0 +1,74 @@
+public class TextAnnotation
+{
+    public string Text { get; set; }
+    public List<int> BoundingPolygon { get; set; } // x, y coordinates list
+}
+
+public class ImageAnnotations
+{
+    public string ImagePath { get; set; }
+    public List<TextAnnotation> Annotations { get; set; } = new List<TextAnnotation>();
+}
+
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Newtonsoft.Json;
+
+public class AnnotationService
+{
+    public void GenerateAnnotationFile(string imagePath, List<TextAnnotation> textAnnotations)
+    {
+        var annotations = new ImageAnnotations
+        {
+            ImagePath = imagePath,
+            Annotations = textAnnotations
+        };
+
+        // Convert annotations to JSON format
+        string jsonContent = JsonConvert.SerializeObject(annotations, Formatting.Indented);
+
+        // Define the output file path with .json extension
+        string outputPath = Path.ChangeExtension(imagePath, ".json");
+
+        // Write JSON content to a file
+        File.WriteAllText(outputPath, jsonContent);
+        Console.WriteLine($"Annotation file created at {outputPath}");
+    }
+}
+
+
+public class AnnotationController
+{
+    private readonly AnnotationService _annotationService;
+
+    public AnnotationController(AnnotationService annotationService)
+    {
+        _annotationService = annotationService;
+    }
+
+    public void AnnotateImageWithText()
+    {
+        // Example TIFF file path
+        string imagePath = @"C:\path\to\your\image.tiff";
+
+        // Example annotations with bounding polygons and text
+        List<TextAnnotation> textAnnotations = new List<TextAnnotation>
+        {
+            new TextAnnotation
+            {
+                Text = "Hello",
+                BoundingPolygon = new List<int> { 50, 50, 150, 50, 150, 100, 50, 100 }
+            },
+            new TextAnnotation
+            {
+                Text = "World",
+                BoundingPolygon = new List<int> { 200, 200, 300, 200, 300, 250, 200, 250 }
+            }
+        };
+
+        // Generate the annotation file
+        _annotationService.GenerateAnnotationFile(imagePath, textAnnotations);
+    }
+}
