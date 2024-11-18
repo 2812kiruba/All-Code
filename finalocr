@@ -1,0 +1,243 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
+using SharpCompress.Common;
+using SpeechToText.Speech;
+using System;
+using System.Buffers.Text;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+
+
+namespace SpeechToText.Web.Controller
+{
+    public class HomeController
+    {
+        private readonly IWebHostEnvironment _webHostEnvironment;
+        private OCRGenerationService _oCRGeneration;
+
+        public HomeController(IWebHostEnvironment webHostEnvironment, OCRGenerationService oCRGeneration)
+        {
+            _webHostEnvironment = webHostEnvironment;
+            _oCRGeneration = oCRGeneration;
+        }
+
+        //public async Task<IActionResult> TiffConversion([FromBody] List<IFormFile> input)
+        //{
+        //    try
+        //    {
+        //        string outputPath = Path.Combine(_webHostEnvironment.WebRootPath, "output.pdf");
+        //        await _oCRGeneration.GenerationPdf(input, outputPath);
+
+        //    }
+        //    catch (Exception ex)
+        //    {
+
+        //    }
+        //}
+        [HttpPost("download-pdf")]
+        public async Task<string> ProcessOcr(List<IFormFile> input)
+        {
+            await _oCRGeneration.ProcessOcrAndHighlightAsync(input);
+            var filePath = Path.Combine(_webHostEnvironment.WebRootPath, "output.pdf");
+
+            // Check if the file exists
+           
+            // Read the file into a byte array
+            byte[] fileBytes = System.IO.File.ReadAllBytes(filePath);
+
+            // Return the file as a downloadable content (PDF)
+            // return File(fileBytes, "application/pdf", ".pdf");
+            string base64String = Convert.ToBase64String(fileBytes);
+            return base64String;
+        } 
+
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Threading.Tasks;
+using ImageMagick;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using PdfSharp.Drawing;
+using PdfSharp.Pdf;
+using Tesseract;
+using TiffLibrary;
+using Volo.Abp;
+using Volo.Abp.Application.Services;
+using Volo.Abp.DependencyInjection;
+using SixLabors.ImageSharp.Formats.Tiff;
+
+
+namespace SpeechToText.Speech
+{
+    public class OCRGenerationService: ApplicationService,ITransientDependency
+    {
+        private readonly IWebHostEnvironment _webHostEnvironment;
+
+        public OCRGenerationService(IWebHostEnvironment webHostEnvironment)
+        {
+            _webHostEnvironment = webHostEnvironment;
+        }
+
+
+
+        public async Task<List<string>> ProcessOcrAndHighlightAsync(List<IFormFile> tiffFiles)
+        {
+            try
+            {
+
+                var result = new List<string>();
+                string pdfOutputPath = Path.Combine(_webHostEnvironment.WebRootPath, "output.pdf");
+
+                var pdfDocument = new PdfDocument();
+                foreach (var tiffFile in tiffFiles)
+                {
+                    // Convert IFormFile to image
+                    var stream = new MemoryStream();
+
+                    await tiffFile.CopyToAsync(stream);
+                    var img = Image.FromStream(stream);
+                    var ocrResult = await PerformOcrAndHighlightAsync(img);
+                    //using (var bitmap = new Bitmap(ocrResult))
+                    //{
+
+                    //    // Create a new PDF page
+                    //    var pdfPage = pdfDocument.AddPage();
+                    //    var gfx = XGraphics.FromPdfPage(pdfPage);
+
+                    //    // Convert the Bitmap to an XImage (PDFSharp format)
+
+                    //    bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Emf);  // Save the frame to MemoryStream as PNG
+                    //    stream.Seek(0, SeekOrigin.Begin);
+                    //    var xImage = XImage.FromStream(stream);
+
+                    //    // Draw the image onto the PDF page
+                    //    gfx.DrawImage(xImage, 0, 0, pdfPage.Width, pdfPage.Height);
+
+
+                    //}
+                    using (var image = SixLabors.ImageSharp.Image.Load(ocrResult))
+                    {
+                        // Create a new PDF document
+
+
+                        // Create a new page
+                        PdfPage pdfPage = pdfDocument.AddPage();
+                        XGraphics gfx = XGraphics.FromPdfPage(pdfPage);
+
+                        // Set the scaling factor (you can adjust this depending on the image size)
+                        var scaleX = pdfPage.Width / image.Width;
+                        var scaleY = pdfPage.Height / image.Height;
+                        //MemoryStream memo = new MemoryStream(File.ReadAllBytes(ocrResult));
+                        //var xImage = XImage.FromStream(memo);
+                        //gfx.DrawImage(xImage, 0, 0, pdfPage.Width, pdfPage.Height);
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            // Convert the ImageSharp image to a byte array and write it to the memory stream as JPEG
+                            image.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder());
+                            ms.Position = 0; // Reset the stream position to 0 after saving the image to stream
+
+                            // Use PdfSharpCore to load the JPEG from MemoryStream
+                            XImage xImage = XImage.FromStream(ms);
+                            gfx.DrawImage(xImage, 0, 0, pdfPage.Width, pdfPage.Height);
+                        }
+
+
+                    }
+                }
+                    pdfDocument.Save(pdfOutputPath);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                throw new UserFriendlyException(ex.Message);
+            }
+        }
+
+        private async Task<string> PerformOcrAndHighlightAsync(Image image)
+        {
+            // Convert the image to a Bitmap (needed for drawing and OCR)
+            var bitmap = new Bitmap(image);
+            Pix pix = ConvertBitmapToPix(bitmap);
+
+            // Perform OCR using Tesseract
+            using (var engine = new TesseractEngine("C:\\Users\\KISHORE\\Desktop\\kiruba\\newWeb\\SpeechToText\\src\\SpeechToText.Application\\Tesseract\\", "eng", EngineMode.Default))
+            {
+                using (var page = engine.Process(pix))
+                {
+                    // Draw the bounding boxes on the image
+                    HighlightTextOnImage(bitmap, page);
+
+                    // Save the image with highlights
+                    string resultFilePath = Path.Combine(_webHostEnvironment.WebRootPath, Guid.NewGuid() + "_highlighted.tiff");
+                    Pix imgs = page.GetThresholdedImage();
+
+                    //bitmap.Save(resultFilePath, System.Drawing.Imaging.ImageFormat.Tiff);
+                     imgs.Save(resultFilePath,Tesseract.ImageFormat.Tiff);
+                  //  return imgs;
+                 return resultFilePath;
+                  
+                }
+            }
+        }
+
+        private void HighlightTextOnImage(Bitmap bitmap, Page ocrPage)
+        {
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.DrawRectangle(Pens.Red, new Rectangle(0, 0, bitmap.Width, bitmap.Height)); // Optional: Draw a border around the image
+          
+
+            }
+        }
+
+        private Pix ConvertBitmapToPix(Bitmap bitmap)
+        {
+            // Save the bitmap to a memory stream as PNG (you can also save as TIFF if you prefer)
+            using (var ms = new MemoryStream())
+            {
+                bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                ms.Seek(0, SeekOrigin.Begin);
+
+                // Load the PNG from the memory stream into a Pix object
+                return Pix.LoadFromMemory(ms.ToArray());
+            }
+        }
+    }
+}
