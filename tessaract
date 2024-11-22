@@ -1,0 +1,54 @@
+using System.IO;
+using iTextSharp.text;
+using iTextSharp.text.pdf;
+using Tesseract;
+
+public class SearchablePdfService
+{
+    private readonly string _tessDataPath;
+
+    public SearchablePdfService(string tessDataPath)
+    {
+        _tessDataPath = tessDataPath;
+    }
+
+    public void ConvertImageToSearchablePdf(string imagePath, string outputPdfPath, string language = "eng")
+    {
+        // Initialize Tesseract Engine
+        using var engine = new TesseractEngine(_tessDataPath, language, EngineMode.Default);
+
+        // Process the image
+        using var img = Pix.LoadFromFile(imagePath);
+        using var page = engine.Process(img);
+        string extractedText = page.GetText();
+
+        // Create PDF
+        using var pdfDocument = new Document();
+        using var pdfWriter = PdfWriter.GetInstance(pdfDocument, new FileStream(outputPdfPath, FileMode.Create));
+        
+        pdfDocument.Open();
+
+        // Add image to the PDF
+        var pdfImage = Image.GetInstance(imagePath);
+        pdfDocument.Add(pdfImage);
+
+        // Add extracted text as hidden layer
+        PdfLayer hiddenLayer = new PdfLayer("InvisibleTextLayer", pdfWriter);
+        var baseFont = BaseFont.CreateFont(BaseFont.HELVETICA, BaseFont.CP1252, BaseFont.NOT_EMBEDDED);
+        var content = pdfWriter.DirectContent;
+        content.BeginLayer(hiddenLayer);
+        content.SetFontAndSize(baseFont, 12);
+        content.SetTextMatrix(50, 50); // Adjust position
+        content.ShowText(extractedText);
+        content.EndLayer();
+
+        pdfDocument.Close();
+    }
+}
+
+
+
+
+
+
+
