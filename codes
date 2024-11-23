@@ -1,43 +1,173 @@
-    public string FileName { get; set; }
-    public byte[] ContentPdf { get; set; }
-
-    public string Status {  get; set; }
-}
+https://ocr.space/ocrapi#searchablepdf
+https://ocr.space/ocrapi#get
 
 
+  [HttpPost("postman-pdf")]
 
-      public async Task<List<PdfFile>> CreatePdfFilesToProcessv1(List<IFormFile> input)
-      {
-          var pdfFiles = new List<PdfFile>();
-          foreach (var file in input)
-          {
-              var memoryStream = new MemoryStream();
-              await file.CopyToAsync(memoryStream);
-              var pdfData = memoryStream.ToArray();
-
-              // Create an instance of the PdfFile entity
-              var pdfEntity = new PdfFile
-              {
-                  FileName = file.FileName,  // The original file name
-                  ContentPdf = pdfData,  // Store the file content as a byte array
-                  Status = "Uploaded"  // Status of the file upload
-              };
-              pdfFiles.Add(pdfEntity);
-          }
-
-          return pdfFiles;
-      }
-
-
-
-  public class MyPdfService:  ITransientDependency
+  public async Task<string> ProcessOcrPostman(IFormFile input)
   {
-  
-      private readonly IBackgroundJobManager _backgroundJobManager;
-      private readonly IRepository<PdfFile, Guid> _pdfDocumentRepository;
+      var fileoutPath = Path.Combine(_webHostEnvironment.WebRootPath, "output.pdf");
+      await _oCRpostGeneration.ProcessImageAsync(input, fileoutPath);
+      var filePath = Path.Combine(_webHostEnvironment.WebRootPath, "output.pdf");
+
+      // Check if the file exists
+
+      // Read the file into a byte array
+      byte[] fileBytes = System.IO.File.ReadAllBytes(filePath);
+
+      // Return the file as a downloadable content (PDF)
+      // return File(fileBytes, "application/pdf", "output.pdf");
+      return filePath;
+  }
 
 
-      public MyPdfService(IRepository<PdfFile, Guid> pdfDocumentRepository)
-      {
-          _pdfDocumentRepository = pdfDocumentRepository;
-      }
+
+
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
+
+using System;
+using System.Drawing;
+using System.IO;
+using System.Linq.Expressions;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Threading.Tasks;
+using Tesseract;
+using TiffLibrary;
+using Volo.Abp;
+using Volo.Abp.Application.Services;
+using Volo.Abp.DependencyInjection;
+
+public class FreeOcrOnlinePostMan :ApplicationService, ITransientDependency
+{
+    private const string ApiKey = "K87930450588957";
+    private readonly IWebHostEnvironment _webHostEnvironment;
+    private const string OcrApiUrl = "https://api.ocr.space/parse/image";
+
+    public FreeOcrOnlinePostMan(IWebHostEnvironment webHostEnvironment)
+    {
+        _webHostEnvironment = webHostEnvironment;
+    }
+
+
+    private Pix ConvertBitmapToPix(Bitmap bitmap)
+    {
+        // Save the bitmap to a memory stream as PNG (you can also save as TIFF if you prefer)
+        using (var ms = new MemoryStream())
+        {
+            bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            ms.Seek(0, SeekOrigin.Begin);
+
+            // Load the PNG from the memory stream into a Pix object
+            return Pix.LoadFromMemory(ms.ToArray());
+        }
+    }
+    public async Task<string> ProcessImageAsync(IFormFile input, string outputPath)
+    {
+        try
+        {
+
+
+            //if (!File.Exists(filePath))
+            //    Directory.CreateDirectory(filePath);
+
+            var stream = new MemoryStream();
+
+            await input.CopyToAsync(stream);
+            var img = Image.FromStream(stream);
+
+            var bitmap = new Bitmap(img);
+            Pix pix = ConvertBitmapToPix(bitmap);
+
+                    string resultFilePath = Path.Combine(_webHostEnvironment.WebRootPath, "_highlighted.png");
+            // Perform OCR using Tesseract
+            using (var engine = new TesseractEngine("C:\\Users\\KISHORE\\Desktop\\kiruba\\newWeb\\SpeechToText\\src\\SpeechToText.Application\\Tesseract\\", "eng", EngineMode.Default))
+            {
+                using (var page = engine.Process(pix))
+                {
+                    
+
+                    // Save the image with highlights
+                    Pix imgs = page.GetThresholdedImage();
+
+                    //bitmap.Save(resultFilePath, System.Drawing.Imaging.ImageFormat.Tiff);
+                    imgs.Save(resultFilePath, Tesseract.ImageFormat.Png);
+                   
+
+                }
+            }
+
+            // Save the file
+            using (var fileStream = new FileStream(resultFilePath, FileMode.Create))
+            {
+                await input.CopyToAsync(fileStream);
+            }
+
+            using (var client = new HttpClient())
+            using (var formData = new MultipartFormDataContent())
+
+            {
+                // Add headers
+                //client.DefaultRequestHeaders.Add("Content-Type", "multipart/form-data; boundary=<calculated when request is sent>");
+                //client.DefaultRequestHeaders.Add("Content-Length", "<calculated when request is sent>");
+               // client.DefaultRequestHeaders.Add("Host", "<calculated when request is sent>");
+                client.DefaultRequestHeaders.Add("User-Agent", "PostmanRuntime/7.42.0");
+                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+                client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
+                client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+                client.DefaultRequestHeaders.Add("api-key", ApiKey);
+
+                // Add form fields
+                formData.Add(new StringContent("eng"), "language");
+                formData.Add(new StringContent("false"), "IsOverlayRequired");
+                formData.Add(new StringContent("true"), "iscreatesearchablepdf");
+                formData.Add(new StringContent("true"), "issearchablepdfhidetextlayer");
+
+                // Add file
+                var fileContent = new ByteArrayContent(File.ReadAllBytes(resultFilePath));
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue("multipart/form-data");
+                formData.Add(fileContent, "file", Path.GetFileName(resultFilePath));
+
+                // Send POST request
+                HttpResponseMessage response = null;
+                do
+                {
+                  response = await client.PostAsync(OcrApiUrl, formData);
+                } while (!response.IsSuccessStatusCode);
+               
+
+                // Parse response
+                var result = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("API Response: " + result);
+
+                // Extract the SearchablePdfUrl from the response
+                dynamic jsonResponse = Newtonsoft.Json.JsonConvert.DeserializeObject(result);
+                string pdfUrl = jsonResponse?.SearchablePDFURL;
+
+                if (string.IsNullOrWhiteSpace(pdfUrl))
+                    throw new Exception("No SearchablePdfUrl found in the response.");
+
+                // Download the PDF file
+                using (var pdfResponse = await client.GetAsync(pdfUrl))
+                {
+                    if (!pdfResponse.IsSuccessStatusCode)
+                        throw new Exception("Failed to download the generated searchable PDF.");
+
+                    // Save the PDF to the specified output path
+                    byte[] pdfData = await pdfResponse.Content.ReadAsByteArrayAsync();
+                    File.WriteAllBytes(outputPath, pdfData);
+                    Console.WriteLine($"PDF saved to {outputPath}");
+                }
+
+                return pdfUrl;
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new UserFriendlyException(ex.Message);
+        }
+        }
+    }
+
